@@ -16,6 +16,7 @@ program
   .option('-f, --file [path]', 'Path to HTML or Markdown file that should be proofread.')
   .option('-l, --file-list [path]', 'Path to a list of files that should be proofread.')
   .option('-c, --config-file [path]', 'Path to a custom configuration file.')
+  .option('-o, --output [print|json]', 'Whether to print the results or save as JSON')
   .parse(process.argv);
 
 //if custom config file was provided
@@ -59,29 +60,39 @@ function toHTML(path, content) {
   return content;
 }
 
-function printResults(title, results) {
-  console.log('### Results for ' + title + ' ###');
-  console.log();
-
-  results.forEach(function (result) {
-    var writeGood = result.suggestions.writeGood;
-    var spelling = result.suggestions.spelling;
-
-    //Printing output
-    if (writeGood.length || spelling.length) {
-      console.log(clc.red(result.text));
-
-      writeGood.forEach(function (item) {
-        console.log(clc.blue.bold(' - ' + item.reason));
-      });
-
-      spelling.forEach(function (item) {
-        console.log(clc.magenta.bold(' - "' + item.word + '" -> ' + item.suggestions));
-      });
-
+function printResults(allFiles) {
+   allFiles.forEach(function (file) {
+      console.log('### Results for ' + file.file + ' ###');
       console.log();
-    }
-  });
+
+      file.results.forEach(function (result) {
+        var writeGood = result.suggestions.writeGood;
+        var spelling = result.suggestions.spelling;
+
+        //Printing output
+        if (writeGood.length || spelling.length) {
+          console.log(clc.red(result.text));
+
+          writeGood.forEach(function (item) {
+            console.log(clc.blue.bold(' - ' + item.reason));
+          });
+
+          spelling.forEach(function (item) {
+            console.log(clc.magenta.bold(' - "' + item.word + '" -> ' + item.suggestions));
+          });
+
+          console.log();
+        }
+      });
+   });
+}
+
+function saveResultsJSON(jsonResults) {
+   var resultsFile = 'results.json';
+   if(fs.existsSync(resultsFile)) {
+      fs.writeFileSync(resultsFile, '');
+   }
+   fs.appendFileSync(resultsFile, JSON.stringify(jsonResults));
 }
 
 var sourceLoader = new SourceLoader();
@@ -99,6 +110,7 @@ if (program.url || program.file) {
   });
 }
 
+results = [];
 sourceLoader
   .load()
   .then(function (sources) {
@@ -112,7 +124,16 @@ sourceLoader
 
       return proofreader.proofread(toHTML(source.path, source.content))
         .then(function (result) {
-          printResults(source.path, result);
+          var result = result.filter(function (r) {
+             var writeGood = r.suggestions.writeGood;
+             var spelling = r.suggestions.spelling;
+             return writeGood.length || spelling.length;
+          });
+          var jsonResult = {
+             file: source.path,
+             results: result
+          };
+          results.push(jsonResult);
           return result;
         })
         .catch(function (error) {
@@ -121,10 +142,15 @@ sourceLoader
     }));
   })
   .then(function (files) {
-    files.forEach(function (paragraphs) {
-      //if there are any suggestions exit with 1
-      if (paragraphs && paragraphs.length > 0) {
-        process.exit(1);
-      }
-    });
+   if(program.output === 'json') {
+     saveResultsJSON(results);
+   } else {
+     printResults(results);
+     files.forEach(function (paragraphs) {
+        //if there are any suggestions exit with 1
+        if (paragraphs && paragraphs.length > 0) {
+          process.exit(1);
+        }
+     });
+   }
   });
